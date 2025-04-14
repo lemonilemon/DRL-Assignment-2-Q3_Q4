@@ -10,7 +10,7 @@ from game2048.game import Game2048Env
 
 
 env = Game2048Env()
-approximator = Approximator("./game2048/2048.bin")
+approximator = Approximator("game2048/2048.bin")
 # td_mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
 
 def get_action(state, score):
