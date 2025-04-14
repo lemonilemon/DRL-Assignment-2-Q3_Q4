@@ -4,12 +4,9 @@ import math
 import numpy as np
 import random
 from game2048.game import Game2048Env
-from game2048.ntuple import Approximator
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import List, Dict, Union, Tuple
-
-approximator = Approximator("game2048/2048.bin")
 
 def create_env_from_state(state, score):
     # Create a deep copy of the environment with the given state and score.
@@ -48,40 +45,30 @@ class ChanceNode(BaseNode):
     
     def pull(self):
         self.value = 0.0
-        prob_sum = 0.0
         for tile in self.children.keys():
             if self.children[tile].visits > 0:
                 self.value += (self.children[tile].value / self.children[tile].visits) * self.probabilities[tile]
-                prob_sum += self.probabilities[tile]
-        self.value /= prob_sum if prob_sum > 0 else 1.0
 
 
 
     def __post_init__(self):
-        count = 0
-        for i in range(4):
-            for j in range(4):
-                if self.state[i][j] == 0:
-                    # For each empty cell, add a chance to place a tile
-                    count += 1
-                    self.untried_actions.append((i, j, 2))
-                    self.untried_actions.append((i, j, 4))
-
+        empty_cells = [(i, j) for i in range(4) for j in range(4) if self.state[i][j] == 0]
+        count = len(empty_cells)
+        for i, j in empty_cells:
+            self.untried_actions.append((i, j, 2))
+            self.untried_actions.append((i, j, 4))
         for a in self.untried_actions:
             i, j, val = a
-            # Assign equal probability to each untried action
             self.probabilities[a] = 0.9 / count if val == 2 else 0.1 / count
-
 
 Node = Union[DecisionNode, ChanceNode]
 
 class MCTSWithExpectimax:
-    def __init__(self, env, approximator, iterations, exploration_constant, rollout_depth, gamma):
+    def __init__(self, env, approximator, iterations, exploration_constant, gamma):
         self.env = env # Initialized environment
         self.approximator = approximator
         self.iterations = iterations
         self.c = exploration_constant
-        self.rollout_depth = rollout_depth
         self.gamma = gamma
         self.root = DecisionNode(state=env.board, score=env.score)
     
@@ -111,30 +98,12 @@ class MCTSWithExpectimax:
             probabilities = [ node.probabilities[tile] for tile in tiles ]
             return random.choices(tiles, weights=probabilities, k=1)[0]
 
-    def rollout(self, sim_env, depth) -> float:
-        current_env = copy.deepcopy(sim_env)  # Avoid modifying the original sim_env
-        total_reward = 0.0
-        discount = 1.0
+    def rollout(self, sim_env) -> float:
+        return self.approximator.value(sim_env.board)
 
-        for _ in range(depth):
-            legal_moves = [a for a in range(4) if current_env.is_move_legal(a)]
-            if not legal_moves:  # Game over
-                break
-
-            action = random.choice(legal_moves)
-            prev_score = current_env.score
-            _, new_score, done, _ = current_env.step(action)
-            total_reward += (new_score - prev_score) # Discount not applied here
-            if done:
-                break
-
-            discount *= self.gamma
-
-        # Evaluate the final state using the approximator
-        final_value = self.approximator.value(current_env.board)
-        return total_reward + final_value
 
     def backpropagate(self, node, reward):
+        reward /= 100000
         current = node
         while current is not None:
             if isinstance(current, DecisionNode):
@@ -199,7 +168,7 @@ class MCTSWithExpectimax:
         assert isinstance(node, DecisionNode), "Node should be a chance node after expansion"
 
         # Rollout
-        rollout_reward = self.rollout(sim_env, self.rollout_depth)
+        rollout_reward = self.rollout(sim_env)
         # Backpropagate
         self.backpropagate(node, rollout_reward)
 
