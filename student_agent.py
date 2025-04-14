@@ -8,6 +8,10 @@ import matplotlib.pyplot as plt
 import copy
 import random
 import math
+import sys
+sys.path.append('./2048')
+from mcts import TD_MCTS, TD_MCTS_Node
+from ntuple import Approximator
 
 
 class Game2048Env(gym.Env):
@@ -134,7 +138,7 @@ class Game2048Env(gym.Env):
 
     def step(self, action):
         """Execute one action"""
-        assert self.action_space.contains(action), "Invalid action"
+        assert self.action_space.contains(action), f"Invalid action: {action}"
 
         if action == 0:
             moved = self.move_up()
@@ -151,6 +155,27 @@ class Game2048Env(gym.Env):
 
         if moved:
             self.add_random_tile()
+
+        done = self.is_game_over()
+
+        return self.board, self.score, done, {}
+
+    def _step_without_tile(self, action):
+        """Execute one action"""
+        assert self.action_space.contains(action), f"Invalid action: {action}"
+
+        if action == 0:
+            moved = self.move_up()
+        elif action == 1:
+            moved = self.move_down()
+        elif action == 2:
+            moved = self.move_left()
+        elif action == 3:
+            moved = self.move_right()
+        else:
+            moved = False
+
+        self.last_move_valid = moved  # Record if the move was valid
 
         done = self.is_game_over()
 
@@ -231,10 +256,32 @@ class Game2048Env(gym.Env):
         # If the simulated board is different from the current board, the move is legal
         return not np.array_equal(self.board, temp_board)
 
-def get_action(state, score):
-    env = Game2048Env()
-    return random.choice([0, 1, 2, 3]) # Choose a random action
-    
-    # You can submit this random agent to evaluate the performance of a purely random strategy.
+env = Game2048Env()
+approximator = Approximator("./2048/2048.bin")
+td_mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
 
+def get_action(state, score):
+    # Create the root node from the current state
+    env.board = state.copy()
+    env.score = score
+    legal_actions = [a for a in range(4) if env.is_move_legal(a)]
+    best_act = legal_actions[0]
+    best_value = -math.inf
+    for a in legal_actions:
+        sim_env = copy.deepcopy(env)
+        new_state, new_score, done, _ = sim_env._step_without_tile(a)
+        value = approximator.value(new_state)
+        if value > best_value:
+            best_value = value
+            best_act = a
+    # print(f"Board state:\n{state}")
+    # print(f"TD-MCTS selected action: {best_act}, current score: {score}")
+    return best_act 
+
+
+if __name__ == "__main__":
+    env = Game2048Env()
+    state = env.reset()
+    score = 0
+    print(get_action(state, score))
 
