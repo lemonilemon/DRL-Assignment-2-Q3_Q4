@@ -18,6 +18,9 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: 0. Downloading binary files
+      run: bash download.sh
+
     - name: 1. Creating virtual env
       uses: actions/setup-python@v4
       with:
