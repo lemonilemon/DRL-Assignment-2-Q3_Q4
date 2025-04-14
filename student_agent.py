@@ -4,6 +4,7 @@ import pickle
 import copy
 import random
 import math
+from game2048.mcts import MCTSWithExpectimax
 from game2048.ntuple import Approximator
 from game2048.game import Game2048Env
 
@@ -11,13 +12,22 @@ from game2048.game import Game2048Env
 
 env = Game2048Env()
 approximator = Approximator("game2048/2048.bin")
-# td_mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
 
 def get_action(state, score):
-    # Create the root node from the current state
     env.board = state.copy()
     env.score = score
+    td_mcts = MCTSWithExpectimax(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
+    # Create the root node from the current state
+    # for _ in range(td_mcts.iterations):
+    #     td_mcts.run_simulation()
+    # best_act, _ = td_mcts.best_action_distribution()
     legal_actions = [a for a in range(4) if env.is_move_legal(a)]
+    # best_act = legal_actions[0]
+    # best_value = -math.inf
+    # for a in legal_actions:
+    #     if td_mcts.root.children[a].value > best_value:
+    #         best_value = td_mcts.root.children[a].value
+    #         best_act = a
     best_act = legal_actions[0]
     best_value = -math.inf
     for a in legal_actions:
