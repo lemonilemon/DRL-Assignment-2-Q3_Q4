@@ -16,7 +16,7 @@ approximator = Approximator("game2048/2048.bin")
 def get_action(state, score):
     env.board = state.copy()
     env.score = score
-    td_mcts = MCTSWithExpectimax(env, approximator, iterations=100, exploration_constant=1.41, gamma=0.99)
+    td_mcts = MCTSWithExpectimax(env, approximator, iterations=100, exploration_constant=0.3, gamma=0.99)
     # Create the root node from the current state
     for _ in range(td_mcts.iterations):
         td_mcts.run_simulation()

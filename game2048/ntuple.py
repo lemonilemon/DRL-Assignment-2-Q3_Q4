@@ -1,5 +1,8 @@
 import numpy as np
 import struct
+import math
+import copy
+from game2048.mcts import create_env_from_state
 
 class Pattern:
     def __init__(self, pattern, iso=8):
@@ -73,4 +76,3 @@ class Approximator:
         for pattern in self.patterns:
             sum += pattern.estimate(board)
         return sum
-

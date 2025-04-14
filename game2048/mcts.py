@@ -43,16 +43,19 @@ class ChanceNode(BaseNode):
     probabilities: Dict[Tuple, float] = field(default_factory=lambda: defaultdict(float))
     children: Dict[Tuple, 'DecisionNode'] = field(default_factory=lambda: defaultdict(DecisionNode))
     
-    def pull(self):
+    def pull(self, approximator):
         self.value = 0.0
         for tile in self.children.keys():
             if self.children[tile].visits > 0:
                 self.value += (self.children[tile].value / self.children[tile].visits) * self.probabilities[tile]
+            else:
+                self.value += approximator.value(self.children[tile].state) / 100000.0 * self.probabilities[tile]
 
 
 
     def __post_init__(self):
         empty_cells = [(i, j) for i in range(4) for j in range(4) if self.state[i][j] == 0]
+
         count = len(empty_cells)
         for i, j in empty_cells:
             self.untried_actions.append((i, j, 2))
@@ -71,6 +74,22 @@ class MCTSWithExpectimax:
         self.c = exploration_constant
         self.gamma = gamma
         self.root = DecisionNode(state=env.board, score=env.score)
+        # Add heuristic policy
+        def policy(state, actions):
+            values = []
+            env = create_env_from_state(state, 0)
+            for action in actions:
+                temp_env = copy.deepcopy(env)
+                _, _, _, _ = temp_env._step_without_tile(action)
+                value = self.approximator.value(temp_env.board)
+                values.append(value)
+            if all(v == -float('inf') for v in values):
+                return [1.0 / len(actions)] * len(actions)
+            max_v = max(values)
+            exp_values = [math.exp((v - max_v) / 130000.0) for v in values]
+            total = sum(exp_values)
+            return [ev / total for ev in exp_values] if total > 0 else [1.0 / len(actions)] * len(actions)
+        self.approximator.policy = policy
     
     def select_child(self, node: Node) -> Union[None, int, Tuple]:
         if not node.children:
@@ -80,14 +99,17 @@ class MCTSWithExpectimax:
             if node.visits == 0:
                 # If the node has never been visited, return a random child
                 return random.choice(list(node.children.keys()))
+            actions = list(node.children.keys())
+            priors = self.approximator.policy(node.state, actions)
             # Decision node: Use UCT for selection
             uct_values = []
-            for action, child in node.children.items():
+            for action, prior in zip(actions, priors):
+                child = node.children[action]
                 if child.visits == 0:
                     uct_value = float('inf')
                 else:
                     exploitation = child.value
-                    exploration = self.c * math.sqrt(math.log(node.visits) / child.visits)
+                    exploration = self.c * prior * math.sqrt(math.log(node.visits) / child.visits)
                     uct_value = exploitation + exploration
                 uct_values.append((uct_value, action))
             _, best_action = max(uct_values)
@@ -113,7 +135,7 @@ class MCTSWithExpectimax:
             elif isinstance(current, ChanceNode):
                 # Chance node: Update with expected value (weighted by probability)
                 # This is handled implicitly as children propagate their values
-                current.pull()
+                current.pull(self.approximator)
                 current.visits += 1
             current = current.parent
 
@@ -143,7 +165,9 @@ class MCTSWithExpectimax:
         if node.untried_actions:
             if isinstance(node, DecisionNode):
                 # Expand max node
-                action = random.choice(node.untried_actions)
+                actions = node.untried_actions
+                priors = self.approximator.policy(node.state, actions)
+                action = actions[np.argmax(priors)]
                 node.untried_actions.remove(action)
                 sim_env = create_env_from_state(node.state, node.score)
                 _, _, _, _ = sim_env._step_without_tile(action)
