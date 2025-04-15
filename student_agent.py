@@ -9,14 +9,21 @@ from game2048.ntuple import Approximator
 from game2048.game import Game2048Env
 
 
-
 env = Game2048Env()
 approximator = Approximator("game2048/2048.bin")
+
 
 def get_action(state, score):
     env.board = state.copy()
     env.score = score
-    td_mcts = MCTSWithExpectimax(env, approximator, iterations=100, exploration_constant=0.3, gamma=0.99)
+    td_mcts = MCTSWithExpectimax(
+        env,
+        approximator,
+        iterations=5,
+        exploration_constant=0.1,
+        gamma=1,
+        norm=130000,
+    )
     # Create the root node from the current state
     for _ in range(td_mcts.iterations):
         td_mcts.run_simulation()
@@ -38,9 +45,15 @@ def get_action(state, score):
     #     if value > best_value:
     #         best_value = value
     #         best_act = a
-    print(f"Board state:\n{state}")
+    # print(f"Board state:\n{state}")
+    # print("Children nodes:\n")
+    # for action, child in td_mcts.root.children.items():
+    #     print(
+    #         f"action: {action}, child value: {child.value}, child visits: {child.visits}"
+    #     )
     print(f"TD-MCTS selected action: {best_act}, current score: {score}")
-    return best_act 
+    # input("Press Enter to continue...")
+    return best_act
 
 
 if __name__ == "__main__":
@@ -48,4 +61,3 @@ if __name__ == "__main__":
     state = env.reset()
     score = 0
     print(get_action(state, score))
-
