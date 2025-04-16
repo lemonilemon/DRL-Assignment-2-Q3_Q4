@@ -46,13 +46,11 @@ class MCTS:
         game,
         iterations=1000,
         exploration_constant=0.141,
-        rollout_depth=0,
         expansions_per_simulation=1,
     ):
         self.game = game
         self.iterations = iterations
         self.c = exploration_constant
-        self.rollout_depth = rollout_depth
         self.expansions_per_simulation = expansions_per_simulation
         self.root = None
 
@@ -77,30 +75,13 @@ class MCTS:
 
     def rollout(self, sim_game: "Connect6Game") -> float:
         current_game = sim_game.light_copy()
-        my_color = sim_game.whose_turn()
-        op_color = 3 - my_color
-        for _ in range(self.rollout_depth):
-            legal_moves = [
-                (r, c)
-                for r in range(sim_game.size)
-                for c in range(sim_game.size)
-                if current_game.board[r, c] == 0
-            ]
-            if not legal_moves:
-                break
-            r, c = random.choice(legal_moves)
-            color = sim_game.whose_turn()
-            current_game.board[r, c] = color
-            if current_game.check_win():
-                return 1.0 if color == my_color else -1.0
-            current_game.board[r, c] = 0
-        score = current_game.evaluate_board(my_color)
+        score = current_game.evaluate_board()
         return max(min(score, 1.0), -1.0)
 
     def backpropagate(self, node: Node, reward: float, color: int):
-        logger.debug(f"Backpropagating: {node.move} reward={reward} color={color}")
         current = node
         while current is not None:
+            # logger.debug(f"Backpropagating: {current.move} reward={reward} color={color}")
             current.visits += 1
             node_color = current.move[2]
             current.value += reward if node_color == color else -reward
@@ -118,7 +99,7 @@ class MCTS:
                 break
             node = child
             r, c, color = node.move
-            sim_game.board[r, c] = color
+            sim_game._move((r, c))
 
         # Multiple Expansions
         if node.untried_actions:
@@ -129,17 +110,18 @@ class MCTS:
             for action in actions:
                 node.untried_actions.remove(action)
                 r, c = action
-                color = sim_game.whose_turn()
+                color = sim_game.turn
                 sim_game.board[r, c] = color
                 new_node = Node(state=sim_game.light_copy(), move=(r, c, color), parent=node)
                 node.children[(r, c, color)] = new_node
                 sim_game.board[r, c] = 0  # Reset the board for the next expansion
                 new_nodes.append(new_node)
+                
 
             # Rollout from each new node
             for new_node in new_nodes:
                 rollout_reward = self.rollout(new_node.state)
-                self.backpropagate(new_node, rollout_reward, new_node.state.whose_turn())
+                self.backpropagate(new_node, rollout_reward, new_node.state.turn)
 
     def best_action_distribution(self):
         total_visits = sum(
@@ -176,7 +158,8 @@ class Connect6Game:
         self.size = size
         self.board = np.zeros((size, size), dtype=int)  # 0: Empty, 1: Black, 2: White
         self.game_over = False
-        self.last_opponent_move = None
+        self.turn = self.whose_turn()
+        self.move_left = 1
         self.MCT = MCTS(self)
         # Precompute positional bias
         center = size // 2
@@ -190,20 +173,25 @@ class Connect6Game:
         new_game = Connect6Game(self.size)
         new_game.board = self.board.copy()
         new_game.game_over = self.game_over
-        self.last_opponent_move = self.last_opponent_move
-        self.positional_bias = self.positional_bias.copy()
+        new_game.turn = self.whose_turn()
+        new_game.move_left = self.move_left
+        new_game.positional_bias = self.positional_bias.copy()
         # Don't copy the MCT tree
         return new_game
 
     def reset_board(self):
         self.board.fill(0)
         self.game_over = False
+        self.turn = self.whose_turn()
+        self.move_left = self.move_left
         self.MCT = MCTS(self)
         print("= ", flush=True)
 
     def set_board_size(self, size):
         self.size = size
         self.board = np.zeros((size, size), dtype=int)
+        self.turn = self.whose_turn()
+        self.move_left = self.move_left
         self.game_over = False
         self.MCT = MCTS(self)
         center = size // 2
@@ -252,6 +240,15 @@ class Connect6Game:
             return ord(col_char) - ord("A") - 1
         return ord(col_char) - ord("A")
 
+    def _move(self, move):
+        r, c = move
+        color = self.turn
+        self.board[r][c] = color
+        self.move_left -= 1
+        if self.move_left == 0:
+            self.turn = 3 - self.turn
+            self.move_left = 2
+
     def play_move(self, color, move):
         logger.debug(f"Play move: {color} {move}")
         if self.game_over:
@@ -293,7 +290,11 @@ class Connect6Game:
             if not root_updated or self.MCT.root is None:
                 self.MCT.root = Node(state=self.light_copy(), move=(0, 0, 0))
 
-        self.last_opponent_move = positions[-1]
+        self.move_left -= 1
+        if self.move_left == 0:
+            self.turn = 3 - self.turn
+            self.move_left = 2
+
         if self.check_win():
             self.game_over = True
         print("= ", end="", flush=True)
@@ -331,7 +332,7 @@ class Connect6Game:
         # First move
         if self.MCT.root is None:
             self.MCT.root = Node(state=self.light_copy(), move=(0, 0, 0))
-        logger.debug("START SIMULATE FIRST MOVE")
+        logger.debug("START SIMULATE MOVE")
         for _ in range(self.MCT.iterations):
             self.MCT.run_simulation()
         best_action, _ = self.MCT.best_action_distribution()
@@ -348,10 +349,14 @@ class Connect6Game:
 
         return
 
-    def evaluate_board(self, my_color: int):
+    def evaluate_board(self):
+        my_color = self.turn
         """Enhanced board evaluation with positional bias and threat detection"""
         # Local variables
-        cs = np.array([0, 1, 10, 100, 1000, 10000, 100000], dtype=np.float32)
+        cs = {
+            1: np.array([0, 0, 0, 0, 100, 100, 100000], dtype=np.float32),
+            2: np.array([0, 1, 10, 100, 1000, 100000, 100000], dtype=np.float32)
+        }
         directions = [
             ('horizontal', np.ones((1, 6), dtype=np.int8)),
             ('vertical', np.ones((6, 1), dtype=np.int8)),
@@ -393,7 +398,8 @@ class Connect6Game:
                         continue
                     # Add number of valid sequences to score
                     valid_count = np.sum(valid_seq_mask)
-                    score[color] += valid_count * cs[length]
+                    value = cs[self.move_left][length] if my_color == color else cs[2][length]
+                    score[color] += valid_count * value
 
 
         return (score[my_color] - score[opponent_color]) / (score[my_color] + score[opponent_color])
