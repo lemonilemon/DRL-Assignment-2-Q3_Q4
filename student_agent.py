@@ -29,28 +29,6 @@ def get_action(state, score):
         td_mcts.run_simulation()
 
     best_act, _ = td_mcts.best_action_distribution()
-    # legal_actions = [a for a in range(4) if env.is_move_legal(a)]
-    # best_act = legal_actions[0]
-    # best_value = -math.inf
-    # for a in legal_actions:
-    #     if td_mcts.root.children[a].value > best_value:
-    #         best_value = td_mcts.root.children[a].value
-    #         best_act = a
-    # best_act = legal_actions[0]
-    # best_value = -math.inf
-    # for a in legal_actions:
-    #     sim_env = copy.deepcopy(env)
-    #     new_state, new_score, done, _ = sim_env._step_without_tile(a)
-    #     value = approximator.value(new_state)
-    #     if value > best_value:
-    #         best_value = value
-    #         best_act = a
-    # print(f"Board state:\n{state}")
-    # print("Children nodes:\n")
-    # for action, child in td_mcts.root.children.items():
-    #     print(
-    #         f"action: {action}, child value: {child.value}, child visits: {child.visits}"
-    #     )
     print(f"TD-MCTS selected action: {best_act}, current score: {score}")
     # input("Press Enter to continue...")
     return best_act
