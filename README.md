@@ -4,6 +4,7 @@
 
 - Use Python 3.8.20
 - Install dependencies listed in `requirements.txt`
+- Ludii platform for Q4
 
 ## Q3: Game 2048
 
@@ -21,6 +22,12 @@ To evaluate the agent's performance on the Ludii platform, simply run:
 
 ```bash
 python Connect6.py
+```
+
+To run the agent:
+
+```bash
+gogui-server -loop "python Connect6.py" -port PORT_NUM
 ```
 
 All implementations for Q4 are contained within `Connect6.py.`
