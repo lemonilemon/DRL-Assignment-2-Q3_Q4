@@ -44,10 +44,10 @@ class MCTS:
     def __init__(
         self,
         game,
-        iterations=500,
-        exploration_constant=1.41,
+        iterations=1000,
+        exploration_constant=0.141,
         rollout_depth=0,
-        expansions_per_simulation=2,
+        expansions_per_simulation=1,
     ):
         self.game = game
         self.iterations = iterations
@@ -77,7 +77,7 @@ class MCTS:
 
     def rollout(self, sim_game: "Connect6Game") -> float:
         current_game = sim_game.light_copy()
-        my_color = 1 if self.game.turn == 1 else 2
+        my_color = sim_game.whose_turn()
         op_color = 3 - my_color
         for _ in range(self.rollout_depth):
             legal_moves = [
@@ -94,19 +94,20 @@ class MCTS:
             if current_game.check_win():
                 return 1.0 if color == my_color else -1.0
             current_game.board[r, c] = 0
-        score = current_game.evaluate_board()
-        value = (score[my_color] - score[op_color]) / 100000
-        return max(min(value, 1.0), -1.0)
+        score = current_game.evaluate_board(my_color)
+        return max(min(score, 1.0), -1.0)
 
-    def backpropagate(self, node: Node, reward: float):
+    def backpropagate(self, node: Node, reward: float, color: int):
+        logger.debug(f"Backpropagating: {node.move} reward={reward} color={color}")
         current = node
         while current is not None:
             current.visits += 1
-            current.value += reward
+            node_color = current.move[2]
+            current.value += reward if node_color == color else -reward
             current = current.parent
 
     def run_simulation(self):
-        logger.debug("Running simulation")
+        # logger.debug("Running simulation")
         node = self.root
         sim_game = self.game.light_copy()
 
@@ -119,70 +120,6 @@ class MCTS:
             r, c, color = node.move
             sim_game.board[r, c] = color
 
-        # Prioritized Expansion
-        # if node.untried_actions:
-        #     # Calculate RAVE values or quick evaluations for actions
-        #     action_values = {}
-        #     color = sim_game.whose_turn()
-        #     
-        #     # Start with a subset of actions for efficiency
-        #     eval_candidates = node.untried_actions
-        #     if len(eval_candidates) > 25:
-        #         eval_candidates = random.sample(node.untried_actions, 25)
-        #     
-        #     # Quickly evaluate each action
-        #     for action in eval_candidates:
-        #         r, c = action
-        #         
-        #         # Place stone and evaluate
-        #         sim_game.board[r, c] = color
-        #         
-        #         # Use pattern recognition or simpler eval
-        #         value = sim_game.evaluate_position(r, c, color)
-        #         action_values[action] = value
-        #         
-        #         # Reset board
-        #         sim_game.board[r, c] = 0
-        #     
-        #     # Sort actions by value
-        #     sorted_actions = sorted(action_values.items(), key=lambda x: x[1], reverse=True)
-        #     
-        #     # Select best actions to expand
-        #     num_to_expand = min(self.expansions_per_simulation, len(sorted_actions))
-        #     
-        #     # Expand nodes
-        #     expanded_nodes = []
-        #     for i in range(num_to_expand):
-        #         action, _ = sorted_actions[i]
-        #         # Remove from untried
-        #         node.untried_actions.remove(action)
-        #         
-        #         r, c = action
-        #         sim_game.board[r, c] = color
-        #         
-        #         # Create new node
-        #         new_node = Node(state=copy.deepcopy(sim_game), move=(r, c, color), parent=node)
-        #         node.children[(r, c, color)] = new_node
-        #         expanded_nodes.append(new_node)
-        #         
-        #         # Reset for next expansion
-        #         sim_game.board[r, c] = 0
-        #     
-        #     # Do rollout and backpropagation for expanded nodes
-        #     for expanded_node in expanded_nodes:
-        #         # Set up board for rollout
-        #         r, c, color = expanded_node.move
-        #         sim_game.board[r, c] = color
-        #         
-        #         # Do rollout
-        #         rollout_reward = self.rollout(expanded_node.state)
-        #         
-        #         # Reset
-        #         sim_game.board[r, c] = 0
-        #         
-        #         # Backpropagate
-        #         self.backpropagate(expanded_node, rollout_reward)
-
         # Multiple Expansions
         if node.untried_actions:
             # Expand up to expansions_per_simulation actions
@@ -194,7 +131,7 @@ class MCTS:
                 r, c = action
                 color = sim_game.whose_turn()
                 sim_game.board[r, c] = color
-                new_node = Node(state=copy.deepcopy(sim_game), move=(r, c, color), parent=node)
+                new_node = Node(state=sim_game.light_copy(), move=(r, c, color), parent=node)
                 node.children[(r, c, color)] = new_node
                 sim_game.board[r, c] = 0  # Reset the board for the next expansion
                 new_nodes.append(new_node)
@@ -202,26 +139,7 @@ class MCTS:
             # Rollout from each new node
             for new_node in new_nodes:
                 rollout_reward = self.rollout(new_node.state)
-                self.backpropagate(new_node, rollout_reward)
-
-
-        # # Expansion
-        # if node.untried_actions:
-        #     action = random.choice(node.untried_actions)
-        #     node.untried_actions.remove(action)
-        #     r, c = action
-        #     color = sim_game.whose_turn()
-        #     sim_game.board[r, c] = color
-        #     new_node = Node(
-        #         state=copy.deepcopy(sim_game), move=(r, c, color), parent=node
-        #     )
-        #     node.children[(r, c, color)] = new_node
-        #     node = new_node
-        #
-        # # Rollout
-        # rollout_reward = self.rollout(node.state)
-        # # Backpropagate
-        # self.backpropagate(node, rollout_reward)
+                self.backpropagate(new_node, rollout_reward, new_node.state.whose_turn())
 
     def best_action_distribution(self):
         total_visits = sum(
@@ -257,7 +175,6 @@ class Connect6Game:
     def __init__(self, size=19):
         self.size = size
         self.board = np.zeros((size, size), dtype=int)  # 0: Empty, 1: Black, 2: White
-        self.turn = 1  # 1: Black, 2: White
         self.game_over = False
         self.last_opponent_move = None
         self.MCT = MCTS(self)
@@ -272,14 +189,14 @@ class Connect6Game:
     def light_copy(self):
         new_game = Connect6Game(self.size)
         new_game.board = self.board.copy()
-        new_game.turn = self.turn
         new_game.game_over = self.game_over
+        self.last_opponent_move = self.last_opponent_move
+        self.positional_bias = self.positional_bias.copy()
         # Don't copy the MCT tree
         return new_game
 
     def reset_board(self):
         self.board.fill(0)
-        self.turn = 1
         self.game_over = False
         self.MCT = MCTS(self)
         print("= ", flush=True)
@@ -287,9 +204,14 @@ class Connect6Game:
     def set_board_size(self, size):
         self.size = size
         self.board = np.zeros((size, size), dtype=int)
-        self.turn = 1
         self.game_over = False
         self.MCT = MCTS(self)
+        center = size // 2
+        self.positional_bias = np.zeros((size, size), dtype=np.float32)
+        for r in range(size):
+            for c in range(size):
+                distance = abs(r - center) + abs(c - center)
+                self.positional_bias[r, c] = max(0, (size - distance) / size) * 2
         print("= ", flush=True)
 
     def check_win(self):
@@ -369,10 +291,9 @@ class Connect6Game:
             
             # If we couldn't update the root through the tree, create a new root with the current state
             if not root_updated or self.MCT.root is None:
-                self.MCT.root = Node(state=copy.deepcopy(self), move=(0, 0, 0))
+                self.MCT.root = Node(state=self.light_copy(), move=(0, 0, 0))
 
         self.last_opponent_move = positions[-1]
-        self.turn = self.whose_turn()
         if self.check_win():
             self.game_over = True
         print("= ", end="", flush=True)
@@ -409,7 +330,7 @@ class Connect6Game:
 
         # First move
         if self.MCT.root is None:
-            self.MCT.root = Node(state=copy.deepcopy(self), move=(0, 0, 0))
+            self.MCT.root = Node(state=self.light_copy(), move=(0, 0, 0))
         logger.debug("START SIMULATE FIRST MOVE")
         for _ in range(self.MCT.iterations):
             self.MCT.run_simulation()
@@ -427,7 +348,7 @@ class Connect6Game:
 
         return
 
-    def evaluate_board(self):
+    def evaluate_board(self, my_color: int):
         """Enhanced board evaluation with positional bias and threat detection"""
         # Local variables
         cs = np.array([0, 1, 10, 100, 1000, 10000, 100000], dtype=np.float32)
@@ -444,166 +365,38 @@ class Connect6Game:
         white_mask = (self.board == 2)
         score[1] += np.sum(self.positional_bias[black_mask])
         score[2] += np.sum(self.positional_bias[white_mask])
-        size = self.size
+        opponent_color = 3 - my_color
 
         # Step 2: Sequence evaluation using convolution
-        for color in [1, 2]:
-            # Binary board for this color
+        for color in [opponent_color, my_color]:
+            # Binary masks for this color and opponent
             color_mask = (self.board == color).astype(np.int8)
+            opponent = 3 - color
+            opponent_mask = (self.board == opponent).astype(np.int8)
             
             for direction, kernel in directions:
-                # Convolve to count stones
+                # Count your stones in 6-position windows
                 conv = convolve2d(color_mask, kernel, mode='valid')
+                # Count opponent stones in the same windows
+                opp_conv = convolve2d(opponent_mask, kernel, mode='valid')
                 
-                # Compute blocking conditions aligned to conv shape
-                if direction == 'horizontal':
-                    # conv shape: (size, size-5)
-                    padded = np.pad(self.board, ((0, 0), (1, 1)), mode='constant', constant_values=0)
-                    # Check left end (position before sequence start)
-                    left_block = (padded[:, 1:size-4] != 0) & (padded[:, 1:size-4] != color)
-                    # Check right end (position after sequence end)
-                    right_block = (padded[:, 7:size+2] != 0) & (padded[:, 7:size+2] != color)
-                    blocks = left_block + right_block
-                elif direction == 'vertical':
-                    # conv shape: (size-5, size)
-                    padded = np.pad(self.board, ((1, 1), (0, 0)), mode='constant', constant_values=0)
-                    top_block = (padded[1:size-4, :] != 0) & (padded[1:size-4, :] != color)
-                    bottom_block = (padded[7:size+2, :] != 0) & (padded[7:size+2, :] != color)
-                    blocks = top_block + bottom_block
-                elif direction == 'diagonal':
-                    # conv shape: (size-5, size-5)
-                    padded = np.pad(self.board, ((1, 1), (1, 1)), mode='constant', constant_values=0)
-                    top_left = (padded[1:size-4, 1:size-4] != 0) & (padded[1:size-4, 1:size-4] != color)
-                    bottom_right = (padded[7:size+2, 7:size+2] != 0) & (padded[7:size+2, 7:size+2] != color)
-                    blocks = top_left + bottom_right
-                else:  # anti-diagonal
-                    # conv shape: (size-5, size-5)
-                    padded = np.pad(self.board, ((1, 1), (1, 1)), mode='constant', constant_values=0)
-                    top_right = (padded[1:size-4, 7:size+2] != 0) & (padded[1:size-4, 7:size+2] != color)
-                    bottom_left = (padded[7:size+2, 1:size-4] != 0) & (padded[7:size+2, 1:size-4] != color)
-                    blocks = top_right + bottom_left
-
-                # Score sequences based on length and blocks
+                # Score sequences based on length
                 for length in range(1, 7):
                     seq_mask = (conv == length)
                     if not np.any(seq_mask):
                         continue
-                    value = cs[length]
-                    # Logical operations on same-shaped arrays
-                    blocked_0 = seq_mask & (blocks == 0)
-                    blocked_1 = seq_mask & (blocks == 1)
-                    blocked_2 = seq_mask & (blocks == 2)
-                    score[color] += np.sum(blocked_0) * value
-                    score[color] += np.sum(blocked_1) * value * 0.8
-                    score[color] += np.sum(blocked_2) * value * 0.5
+                    if length == 6:
+                        return 1.0 if color == my_color else -1.0
+                    # Count sequences with no opponent stones (opp_conv == 0)
+                    valid_seq_mask = seq_mask & (opp_conv == 0)
+                    if length < 6 and not np.any(valid_seq_mask):
+                        continue
+                    # Add number of valid sequences to score
+                    valid_count = np.sum(valid_seq_mask)
+                    score[color] += valid_count * cs[length]
 
-        # Step 3: Threat detection
-        empty_positions = np.where(self.board == 0)
-        empty_positions = list(zip(empty_positions[0], empty_positions[1]))
-        masked_positions = self.mask(empty_positions)
-        for color in [1, 2]:
-            opponent = 3 - color
-            for r, c in masked_positions:
-                self.board[r, c] = opponent
-                if self.check_win() == opponent:
-                    score[color] -= 8000
-                self.board[r, c] = 0
 
-        return score
-        # directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
-        # score = {1: 0, 2: 0}
-        # 
-        # # Sequence values (exponential scaling)
-        # cs = {0: 0, 1: 1, 2: 10, 3: 100, 4: 1000, 5: 10000, 6: 100000}
-        # 
-        # # Positional bias - center is better
-        # center = self.size // 2
-        # 
-        # # Check for sequences in all directions
-        # for r in range(self.size):
-        #     for c in range(self.size):
-        #         # Add positional bias
-        #         if self.board[r, c] != 0:
-        #             color = self.board[r, c]
-        #             # Distance from center (Manhattan distance)
-        #             distance = abs(r - center) + abs(c - center)
-        #             position_value = max(0, (self.size - distance) / self.size)
-        #             score[color] += position_value * 2  # Small bonus for central positions
-        #         
-        #         # Check sequences
-        #         for dr, dc in directions:
-        #             counter = [0, 0, 0]  # [empty, black, white]
-        #             blocks = [0, 0]      # Blocked ends [start, end]
-        #             rr, cc = r, c
-        #             
-        #             # Check if starting point is blocked
-        #             if not (0 <= r-dr < self.size and 0 <= c-dc < self.size):
-        #                 blocks[0] = 1
-        #             elif self.board[r-dr, c-dc] != 0:
-        #                 if rr < self.size and cc < self.size and self.board[rr, cc] != 0 and self.board[rr, cc] != self.board[r-dr, c-dc]:
-        #                     blocks[0] = 1
-        #             
-        #             # Count stones in sequence
-        #             for i in range(6):
-        #                 if 0 <= rr < self.size and 0 <= cc < self.size:
-        #                     counter[self.board[rr, cc]] += 1
-        #                     rr += dr
-        #                     cc += dc
-        #                 else:
-        #                     blocks[1] = 1
-        #                     break
-        #             
-        #             # Check if end point is blocked
-        #             if 0 <= rr < self.size and 0 <= cc < self.size:
-        #                 if self.board[rr, cc] != 0:
-        #                     if self.board[rr, cc] != self.board[r, c] and self.board[r, c] != 0:
-        #                         blocks[1] = 1
-        #             else:
-        #                 blocks[1] = 1
-        #             
-        #             # Evaluate the sequence
-        #             if sum(counter) == 6:
-        #                 # Pure sequences
-        #                 if counter[1] > 0 and counter[2] == 0:
-        #                     # Black sequence
-        #                     value = cs[counter[1]]
-        #                     # Reduce score if blocked
-        #                     if blocks[0] + blocks[1] == 1:  # One end blocked
-        #                         value *= 0.8
-        #                     elif blocks[0] + blocks[1] == 2:  # Both ends blocked
-        #                         value *= 0.5
-        #                     score[1] += value
-        #                     
-        #                 elif counter[2] > 0 and counter[1] == 0:
-        #                     # White sequence
-        #                     value = cs[counter[2]]
-        #                     # Reduce score if blocked
-        #                     if blocks[0] + blocks[1] == 1:  # One end blocked
-        #                         value *= 0.8
-        #                     elif blocks[0] + blocks[1] == 2:  # Both ends blocked
-        #                         value *= 0.5
-        #                     score[2] += value
-        # 
-        # # Detect immediate threats (opponent about to win)
-        # for color in [1, 2]:
-        #     opponent = 3 - color
-        #     # Check if opponent has a winning threat
-        #     for r in range(self.size):
-        #         for c in range(self.size):
-        #             if self.board[r, c] == 0:
-        #                 # Try opponent's move
-        #                 self.board[r, c] = opponent
-        #                 if self.check_win():
-        #                     # Opponent has a winning move
-        #                     score[color] -= 8000  # Heavy penalty
-        #                 self.board[r, c] = 0  # Reset
-        # return score
-
-    def evaluate_position(self, r, c, color):
-        self.board[r, c] = color
-        score = self.evaluate_board()
-        self.board[r, c] = 0
-        return score[color]
+        return (score[my_color] - score[opponent_color]) / (score[my_color] + score[opponent_color])
 
     def show_board(self):
         print("= ")
@@ -676,14 +469,9 @@ class Connect6Game:
     def whose_turn(self):
         black_num = np.count_nonzero(self.board == 1)
         white_num = np.count_nonzero(self.board == 2)
-        if black_num == 0 and white_num == 0:
-            return 1  # Black starts
-        if black_num == 1 and white_num == 0:
-            return 2
-        expected_black = (white_num * 2) + 1
-        if black_num == expected_black:
-            return 2
-        return 1
+        black_turn_done = (black_num + 1) // 2
+        white_turn_done = white_num // 2
+        return 1 if black_turn_done <= white_turn_done else 2
 
 
 if __name__ == "__main__":
